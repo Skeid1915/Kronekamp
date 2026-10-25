@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Administrasjon: Kronekamp Skeid</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-name">Skeid<span class="brand-sub">Kronekamp, administrasjon</span></div>
+    </div>
+    <a class="btn btn-line btn-small" href="/" target="_blank" rel="noopener">Åpne forsiden</a>
+  </header>
+
+  <main>
+    <div class="status hidden" id="status" role="status"></div>
+    <div class="admin">
+      <section class="panel" aria-labelledby="h-settings">
+        <h2 id="h-settings">Kampen</h2>
+        <p>Legg inn det offisielle tilskuertallet etter kampen. Da stenges påmeldingen, forsiden viser resultatet, og fakturalisten blir klar.</p>
+        <div class="row">
+          <label class="f">Offisielt tilskuertall <span class="opt">La feltet stå tomt før kampen. Forsiden bruker da 600 som estimat.</span>
+            <input type="number" id="s-att" min="0" step="1" inputmode="numeric">
+          </label>
+        </div>
+        <div class="form-actions"><button class="btn btn-red" id="s-save" type="button">Lagre tilskuertall</button></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-list">
+        <h2 id="h-list">Bidragsytere</h2>
+        <div class="sum" id="sum"></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Navn</th><th>Kontakt</th><th>Avtale</th><th class="num">Kr per tilskuer</th><th class="num" id="th-amount">Beløp</th><th></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="6" class="muted">Henter bidrag …</td></tr></tbody>
+        </table></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-export">
+        <h2 id="h-export">Fakturaliste til Tripletex</h2>
+        <p id="export-help">Fakturalisten blir tilgjengelig når det offisielle tilskuertallet er lagt inn.</p>
+        <div class="form-actions" style="margin-top:0">
+          <a class="btn btn-red" id="export-btn" href="/admin/api/export.csv" aria-disabled="true">Last ned fakturaliste (CSV)</a>
+        </div>
+        <p class="note">CSV-filen er semikolonseparert med norsk desimalkomma og åpnes direkte i Excel. Kolonnene kobles til feltene i Tripletex sin import av kunder og ordre.</p>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+"use strict";
+var state = { expected: 600, finalAttendance: null, pledges: [] };
+var confirmId = null;
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function round2(n){ return Math.round(n * 100) / 100; }
+var nf0 = new Intl.NumberFormat("nb-NO", {maximumFractionDigits:0});
+var nf2 = new Intl.NumberFormat("nb-NO", {minimumFractionDigits:2, maximumFractionDigits:2});
+function fmtKr(n){ var r = round2(n); return Number.isInteger(r) ? nf0.format(r) : nf2.format(r); }
+function rateOf(p){ return Number(p.kroner) / (Number(p.per) || 1); }
+function amountAt(p, att){ return round2(rateOf(p) * (p.cap ? Math.min(att, p.cap) : att)); }
+function deal(p){ return fmtKr(p.kroner) + " kr per " + (Number(p.per) === 1 ? "tilskuer" : nf0.format(p.per) + " tilskuere"); }
+function status(msg, kind){ var el = $("status"); el.textContent = msg || ""; el.className = "status " + (kind || "") + (msg ? "" : " hidden"); }
+
+function api(method, url, body){
+  return fetch(url, { method: method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, cache: "no-store" })
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok) throw new Error(j.error || "Feil fra serveren."); return j; }); });
+}
+
+function render(){
+  var final = state.finalAttendance != null;
+  var att = final ? state.finalAttendance : state.expected;
+  if (document.activeElement !== $("s-att")) $("s-att").value = final ? state.finalAttendance : "";
+  $("th-amount").textContent = final ? "Beløp" : "Est. beløp (" + state.expected + ")";
+  var list = state.pledges.slice().sort(function(a, b){ return amountAt(b, att) - amountAt(a, att); });
+  var total = list.reduce(function(s, p){ return s + amountAt(p, att); }, 0);
+  var firms = list.filter(function(p){ return p.type === "bedrift"; }).length;
+  $("sum").innerHTML = '<div>Bedrifter<span>' + firms + '</span></div><div>Privatpersoner<span>' + (list.length - firms) + '</span></div><div>' +
+    (final ? "Til fakturering" : "Estimert ved " + state.expected) + '<span>' + esc(fmtKr(total)) + ' kr</span></div>';
+  $("rows").innerHTML = !list.length ? '<tr><td colspan="6" class="muted">Ingen bidrag registrert ennå.</td></tr>' : list.map(function(p){
+    var acts = confirmId === p.id
+      ? '<button class="btn btn-danger btn-small" data-act="del-yes" data-id="' + p.id + '">Bekreft sletting</button><button class="btn btn-line btn-small" data-act="del-no">Avbryt</button>'
+      : '<button class="btn btn-line btn-small" data-act="anon" data-id="' + p.id + '">' + (p.anon ? "Vis navn" : "Gjør anonym") + '</button>' +
+        (p.has_logo ? '<button class="btn btn-line btn-small" data-act="logo" data-id="' + p.id + '">Fjern logo</button>' : '') +
+        '<button class="btn btn-line btn-small" data-act="del" data-id="' + p.id + '">Slett</button>';
+    return '<tr><td><strong>' + esc(p.name) + '</strong><span class="sub">' + (p.type === "bedrift" ? "Bedrift, org.nr. " + esc(p.orgnr) : "Privatperson") +
+      (p.contact ? ", " + esc(p.contact) : "") + (p.anon ? ' <span class="tag">Anonym</span>' : '') + (p.has_logo ? ' <span class="tag">Logo</span>' : '') +
+      '</span><span class="sub">Registrert ' + new Date(p.created_at).toLocaleString("nb-NO", { dateStyle: "short", timeStyle: "short" }) + '</span></td>' +
+      '<td>' + esc(p.email) + '<span class="sub">' + esc(p.phone) + '</span><span class="sub">' + esc(p.address) + ', ' + esc(p.zip) + ' ' + esc(p.city) + '</span></td>' +
+      '<td>' + esc(deal(p)) + (p.cap ? '<span class="sub">Tak: ' + nf0.format(p.cap) + ' tilskuere</span>' : '') + '</td>' +
+      '<td class="num">' + esc(fmtKr(rateOf(p))) + '</td><td class="num">' + esc(fmtKr(amountAt(p, att))) + ' kr</td>' +
+      '<td><div class="actions">' + acts + '</div></td></tr>';
+  }).join("");
+  var ok = final && list.length > 0;
+  $("export-btn").setAttribute("aria-disabled", String(!ok));
+  $("export-btn").style.pointerEvents = ok ? "" : "none";
+  $("export-btn").style.opacity = ok ? "" : ".5";
+  $("export-help").textContent = final
+    ? (list.length ? "Tilskuertall: " + nf0.format(att) + ". Én rad per bidragsyter med beløpet som skal faktureres." : "Ingen bidrag å fakturere.")
+    : "Fakturalisten blir tilgjengelig når det offisielle tilskuertallet er lagt inn.";
+}
+
+function load(){
+  return api("GET", "/admin/api/pledges").then(function(d){ state = d; render(); })
+    .catch(function(e){ status("Kunne ikke hente bidragene: " + e.message, "bad"); });
+}
+
+$("s-save").addEventListener("click", function(){
+  var v = $("s-att").value.trim();
+  if (v !== "" && !(Number.isInteger(Number(v)) && Number(v) >= 0)) return status("Tilskuertallet må være et helt tall.", "bad");
+  api("PUT", "/admin/api/settings", { finalAttendance: v === "" ? null : Number(v) })
+    .then(function(){ status(v === "" ? "Tilskuertallet er fjernet. Påmeldingen er åpen igjen." : "Tilskuertallet er lagret. Påmeldingen er stengt.", "ok"); return load(); })
+    .catch(function(e){ status(e.message, "bad"); });
+});
+
+$("rows").addEventListener("click", function(e){
+  var b = e.target.closest("button[data-act]"); if (!b) return;
+  var id = Number(b.dataset.id), act = b.dataset.act;
+  var p = state.pledges.find(function(x){ return x.id === id; });
+  if (act === "del") { confirmId = id; render(); }
+  else if (act === "del-no") { confirmId = null; render(); }
+  else if (act === "del-yes") api("DELETE", "/admin/api/pledges/" + id).then(function(){ confirmId = null; status("Bidraget er slettet.", "ok"); return load(); }).catch(function(e){ status(e.message, "bad"); });
+  else if (act === "anon" && p) api("PATCH", "/admin/api/pledges/" + id, { anon: !p.anon }).then(function(){ status(p.anon ? "Navnet vises nå på forsiden." : "Bidraget vises nå som anonymt.", "ok"); return load(); }).catch(function(e){ status(e.message, "bad"); });
+  else if (act === "logo") api("PATCH", "/admin/api/pledges/" + id, { removeLogo: true }).then(function(){ status("Logoen er fjernet.", "ok"); return load(); }).catch(function(e){ status(e.message, "bad"); });
+});
+
+load();
+setInterval(function(){ if (confirmId == null) load(); }, 30000);
+})();
+</script>
+</body>
+</html>
