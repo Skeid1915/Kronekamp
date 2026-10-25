@@ -47,6 +47,7 @@ async function migrate() {
     );
     ALTER TABLE pledges ADD COLUMN IF NOT EXISTS kasper_ref TEXT UNIQUE;
     ALTER TABLE pledges ADD COLUMN IF NOT EXISTS cap_kr NUMERIC(10,2);
+    ALTER TABLE pledges ADD COLUMN IF NOT EXISTS invoice_known BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 }
 
@@ -94,14 +95,16 @@ function parseLogo(dataUrl) {
   return { buf, mime: png ? "image/png" : jpg ? "image/jpeg" : "image/webp" };
 }
 
-function validate(body) {
+// invoiceKnown: Skeid already has the invoice details (partners via Kasper), so
+// orgnr, phone and address are not required.
+function validate(body, { invoiceKnown = false } = {}) {
   const type = body.type === "bedrift" ? "bedrift" : body.type === "privat" ? "privat" : null;
   const b = type === "bedrift";
   const p = {
     type,
     name: str(body.name, 120),
-    orgnr: b ? str(body.orgnr, 20).replace(/\s/g, "") : null,
-    contact: b ? str(body.contact, 120) : null,
+    orgnr: b ? str(body.orgnr, 20).replace(/\s/g, "") || null : null,
+    contact: b ? str(body.contact, 120) || null : null,
     email: str(body.email, 160),
     phone: str(body.phone, 30),
     address: str(body.address, 160),
@@ -112,16 +115,20 @@ function validate(body) {
     cap: body.cap === null || body.cap === "" || body.cap === undefined ? null : Number(body.cap),
     cap_kr: body.capKr === null || body.capKr === "" || body.capKr === undefined ? null : Number(body.capKr),
     anon: body.anon === true,
+    invoice_known: invoiceKnown,
   };
   const errs = [];
   if (!type) errs.push("type bidragsyter");
   if (!p.name) errs.push(b ? "firmanavn" : "navn");
-  if (b && !/^\d{9}$/.test(p.orgnr || "")) errs.push("organisasjonsnummer med 9 siffer");
+  if (b && !invoiceKnown && !/^\d{9}$/.test(p.orgnr || "")) errs.push("organisasjonsnummer med 9 siffer");
+  if (b && invoiceKnown && p.orgnr && !/^\d{9}$/.test(p.orgnr)) errs.push("organisasjonsnummer med 9 siffer");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) errs.push("gyldig e-post");
-  if (p.phone.replace(/\D/g, "").length < 8) errs.push("mobilnummer");
-  if (!p.address) errs.push("adresse");
-  if (!/^\d{4}$/.test(p.zip)) errs.push("postnummer med 4 siffer");
-  if (!p.city) errs.push("poststed");
+  if (!invoiceKnown) {
+    if (p.phone.replace(/\D/g, "").length < 8) errs.push("mobilnummer");
+    if (!p.address) errs.push("adresse");
+    if (!/^\d{4}$/.test(p.zip)) errs.push("postnummer med 4 siffer");
+    if (!p.city) errs.push("poststed");
+  }
   if (!(p.kroner > 0 && p.kroner <= 100000)) errs.push("kronebeløp");
   if (p.cap !== null && !(isInt(p.cap) && p.cap >= 1 && p.cap <= 100000)) errs.push("tak som helt tall");
   if (p.cap_kr !== null && !(isInt(p.cap_kr) && p.cap_kr >= 1 && p.cap_kr <= 10000000)) errs.push("tak i kroner som helt tall");
@@ -224,22 +231,22 @@ app.put("/api/kasper/pledges/:ref", requireKasper, async (req, res) => {
   try {
     if ((await getFinalAttendance()) !== null) return res.status(409).json({ error: "Påmeldingen er stengt." });
     const body = { ...(req.body || {}), consent: true };
-    const { p, errs } = validate(body);
+    const { p, errs } = validate(body, { invoiceKnown: body.invoiceKnown === true });
     const consentAt = new Date(body.consentAt);
     if (!body.consentAt || isNaN(consentAt)) errs.push("samtykketidspunkt");
     if (errs.length) return res.status(400).json({ error: "Fyll inn: " + errs.join(", ") + "." });
     let logo = null;
     if (p.type === "bedrift") { try { logo = parseLogo(body.logo); } catch (e) { logo = null; } }
     await pool.query(
-      `INSERT INTO pledges (type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,cap_kr,anon,consent_at,logo,logo_mime,kasper_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      `INSERT INTO pledges (type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,cap_kr,anon,consent_at,logo,logo_mime,kasper_ref,invoice_known)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        ON CONFLICT (kasper_ref) DO UPDATE SET type = EXCLUDED.type, name = EXCLUDED.name, orgnr = EXCLUDED.orgnr,
          contact = EXCLUDED.contact, email = EXCLUDED.email, phone = EXCLUDED.phone, address = EXCLUDED.address,
          zip = EXCLUDED.zip, city = EXCLUDED.city, kroner = EXCLUDED.kroner, per = EXCLUDED.per, cap = EXCLUDED.cap,
          cap_kr = EXCLUDED.cap_kr, anon = EXCLUDED.anon, consent_at = EXCLUDED.consent_at,
-         logo = EXCLUDED.logo, logo_mime = EXCLUDED.logo_mime`,
+         logo = EXCLUDED.logo, logo_mime = EXCLUDED.logo_mime, invoice_known = EXCLUDED.invoice_known`,
       [p.type, p.name, p.orgnr, p.contact, p.email, p.phone, p.address, p.zip, p.city, p.kroner, p.per, p.cap, p.cap_kr, p.anon,
-        consentAt, logo ? logo.buf : null, logo ? logo.mime : null, ref]
+        consentAt, logo ? logo.buf : null, logo ? logo.mime : null, ref, p.invoice_known]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -284,7 +291,7 @@ app.get("/admin", requireAdmin, (req, res) => {
 app.get("/admin/api/pledges", requireAdmin, async (req, res) => {
   const r = await pool.query(
     `SELECT id,type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,cap_kr,anon,consent_at,created_at,
-            (logo IS NOT NULL) AS has_logo, (kasper_ref IS NOT NULL) AS from_kasper FROM pledges ORDER BY id`
+            (logo IS NOT NULL) AS has_logo, (kasper_ref IS NOT NULL) AS from_kasper, invoice_known FROM pledges ORDER BY id`
   );
   res.set("Cache-Control", "no-store");
   res.json({
@@ -335,12 +342,12 @@ app.get("/admin/api/export.csv", requireAdmin, async (req, res) => {
     .map((p) => ({ ...p, kroner: Number(p.kroner) }))
     .sort((a, b) => amountAt(b, att) - amountAt(a, att));
   const head = ["Kundetype", "Navn", "Organisasjonsnummer", "Kontaktperson", "E-post", "Mobil", "Adresse", "Postnummer", "Poststed",
-    "Avtale", "Tak (tilskuere)", "Tak (kr)", "Tilskuere fakturert", "Kr per tilskuer", "Beløp", "Forfall (dager)", "Samtykke registrert", "Fakturatekst"];
+    "Avtale", "Tak (tilskuere)", "Tak (kr)", "Tilskuere fakturert", "Kr per tilskuer", "Beløp", "Forfall (dager)", "Samtykke registrert", "Fakturatekst", "Merknad"];
   const lines = [head].concat(rows.map((p) => {
     const n = billed(p, att);
     return [p.type === "bedrift" ? "Bedrift" : "Privatperson", p.name, p.orgnr || "", p.contact || "", p.email, p.phone, p.address, p.zip, p.city,
       deal(p), p.cap || "", capKrOf(p) == null ? "" : dec(capKrOf(p)), n, dec(rateOf(p)), dec(amountAt(p, att)), 14, new Date(p.consent_at).toISOString().slice(0, 10),
-      `${MATCH_TEXT}: ${deal(p)}${capText(p)}, ${nf0.format(n)} tilskuere`];
+      `${MATCH_TEXT}: ${deal(p)}${capText(p)}, ${nf0.format(n)} tilskuere`, p.invoice_known ? "Fakturainfo hos Skeid" : ""];
   }));
   res.set("Content-Type", "text/csv; charset=utf-8");
   res.set("Content-Disposition", 'attachment; filename="kronekamp-skeid-fakturaliste.csv"');

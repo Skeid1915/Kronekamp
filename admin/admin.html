@@ -92,10 +92,11 @@ function render(){
       : '<button class="btn btn-line btn-small" data-act="anon" data-id="' + p.id + '">' + (p.anon ? "Vis navn" : "Gjør anonym") + '</button>' +
         (p.has_logo ? '<button class="btn btn-line btn-small" data-act="logo" data-id="' + p.id + '">Fjern logo</button>' : '') +
         '<button class="btn btn-line btn-small" data-act="del" data-id="' + p.id + '">Slett</button>';
-    return '<tr><td><strong>' + esc(p.name) + '</strong><span class="sub">' + (p.type === "bedrift" ? "Bedrift, org.nr. " + esc(p.orgnr) : "Privatperson") +
+    return '<tr><td><strong>' + esc(p.name) + '</strong><span class="sub">' + (p.type === "bedrift" ? "Bedrift" + (p.orgnr ? ", org.nr. " + esc(p.orgnr) : "") : "Privatperson") +
       (p.contact ? ", " + esc(p.contact) : "") + (p.anon ? ' <span class="tag">Anonym</span>' : '') + (p.has_logo ? ' <span class="tag">Logo</span>' : '') + (p.from_kasper ? ' <span class="tag">Fra Kasper</span>' : '') +
       '</span><span class="sub">Registrert ' + new Date(p.created_at).toLocaleString("nb-NO", { dateStyle: "short", timeStyle: "short" }) + '</span></td>' +
-      '<td>' + esc(p.email) + '<span class="sub">' + esc(p.phone) + '</span><span class="sub">' + esc(p.address) + ', ' + esc(p.zip) + ' ' + esc(p.city) + '</span></td>' +
+      (p.invoice_known ? '<td>' + esc(p.email) + '<span class="sub"><span class="tag">Fakturainfo hos Skeid</span></span></td>'
+        : '<td>' + esc(p.email) + '<span class="sub">' + esc(p.phone) + '</span><span class="sub">' + esc(p.address) + ', ' + esc(p.zip) + ' ' + esc(p.city) + '</span></td>') +
       '<td>' + esc(deal(p)) + (p.cap ? '<span class="sub">Tak: ' + nf0.format(p.cap) + ' tilskuere</span>' : p.capKr != null ? '<span class="sub">Tak: ' + esc(fmtKr(p.capKr)) + ' kr</span>' : '') + '</td>' +
       '<td class="num">' + esc(fmtKr(rateOf(p))) + '</td><td class="num">' + esc(fmtKr(amountAt(p, att))) + ' kr</td>' +
       '<td><div class="actions">' + acts + '</div></td></tr>';
