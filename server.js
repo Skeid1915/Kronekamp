@@ -99,7 +99,7 @@ function validate(body) {
     zip: str(body.zip, 4),
     city: str(body.city, 80),
     kroner: Number(body.kroner),
-    per: Number(body.per),
+    per: 1, // always kroner per single spectator
     cap: body.cap === null || body.cap === "" || body.cap === undefined ? null : Number(body.cap),
     anon: body.anon === true,
   };
@@ -113,7 +113,6 @@ function validate(body) {
   if (!/^\d{4}$/.test(p.zip)) errs.push("postnummer med 4 siffer");
   if (!p.city) errs.push("poststed");
   if (!(p.kroner > 0 && p.kroner <= 100000)) errs.push("kronebeløp");
-  if (!(isInt(p.per) && p.per >= 1 && p.per <= 100000)) errs.push("antall tilskuere i avtalen");
   if (p.cap !== null && !(isInt(p.cap) && p.cap >= 1 && p.cap <= 100000)) errs.push("tak som helt tall");
   if (body.consent !== true) errs.push("samtykke til faktura");
   return { p, errs };

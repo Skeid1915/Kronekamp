@@ -42,7 +42,7 @@
     </section>
 
     <ol class="steps">
-      <li><h3>Velg beløp</h3><p>Du bestemmer selv, for eksempel 50 kr per 100 tilskuere. Sett gjerne et tak på hvor mange tilskuere du støtter.</p></li>
+      <li><h3>Velg beløp</h3><p>Du bestemmer selv hvor mange kroner du gir per tilskuer. Sett gjerne et tak på hvor mange tilskuere du støtter.</p></li>
       <li><h3>Vi teller på lørdag</h3><p>Det offisielle tilskuertallet mot Stjørdals-Blink avgjør hva bidraget ditt blir.</p></li>
       <li><h3>Faktura etter kampen</h3><p>Du får faktura med 14 dagers forfall. Pengene går til Skeid.</p></li>
     </ol>
@@ -59,7 +59,7 @@
 
     <section class="join" id="bli-med" aria-labelledby="h-join">
       <h2 id="h-join">Bli med i kronekampen</h2>
-      <p>Velg hvor mye du vil gi per tilskuer. Etter kampen får du faktura basert på det offisielle tilskuertallet. Adresse, e-post og mobil brukes bare til faktureringen og vises ikke på siden.</p>
+      <p>Velg hvor mange kroner du vil gi per tilskuer. Etter kampen får du faktura basert på det offisielle tilskuertallet. Adresse, e-post og mobil brukes bare til faktureringen og vises ikke på siden.</p>
       <div id="join-closed" class="closed hidden">Påmeldingen er stengt. Takk til alle som var med.</div>
       <div id="join-done" class="done hidden" role="status"><strong>Takk for at du støtter Skeid!</strong>Bidraget ditt er registrert og vises nå på siden. Faktura kommer etter kampen.<div class="form-actions"><button type="button" class="btn btn-line" id="join-again">Registrer et bidrag til</button></div></div>
       <form id="pledge-form" novalidate>
@@ -83,8 +83,7 @@
           <div class="f full">
             <span style="font-weight:600">Bidrag</span>
             <div class="rate-line">
-              <input type="number" id="p-kr" min="1" step="1" aria-label="Kroner" placeholder="50"> <span>kr per</span>
-              <input type="number" id="p-per" min="1" step="1" value="1" aria-label="Antall tilskuere"> <span>tilskuere</span>
+              <input type="number" id="p-kr" min="1" step="1" aria-label="Kroner per tilskuer" placeholder="5"> <span>kr per tilskuer</span>
               <span class="rate-preview" id="p-rate"></span>
             </div>
           </div>
@@ -202,12 +201,12 @@ function syncType(){
   syncRate();
 }
 function syncRate(){
-  var kr = Number($("p-kr").value), per = Number($("p-per").value) || 1;
+  var kr = Number($("p-kr").value);
   if (!(kr > 0)) { $("p-rate").textContent = ""; return; }
-  var r = kr / per, att = data.finalAttendance != null ? data.finalAttendance : data.expected;
+  var r = kr, att = data.finalAttendance != null ? data.finalAttendance : data.expected;
   var cap = Number($("p-cap").value) || 0, n = cap ? Math.min(att, cap) : att;
   var tier = formType() === "bedrift" ? " (" + {gull:"Gull",solv:"Sølv",bronse:"Bronse"}[tierOf(r)] + ")" : "";
-  $("p-rate").textContent = "= " + fmtKr(r) + " kr per tilskuer" + tier + ". Ved " + nf0.format(att) + " tilskuere: " + fmtKr(r * n) + " kr";
+  $("p-rate").textContent = (tier ? tier.slice(1) + ". " : "") + "Ved " + nf0.format(att) + " tilskuere: " + fmtKr(r * n) + " kr";
 }
 function setLogo(url){
   currentLogo = url || null;
@@ -246,7 +245,7 @@ function submit(ev){
   var v = function(id){ return $(id).value.trim(); };
   var body = {
     type: formType(), name: v("p-name"), orgnr: v("p-orgnr"), contact: v("p-contact"), email: v("p-email"), phone: v("p-phone"),
-    address: v("p-address"), zip: v("p-zip"), city: v("p-city"), kroner: Number(v("p-kr")), per: Number(v("p-per")),
+    address: v("p-address"), zip: v("p-zip"), city: v("p-city"), kroner: Number(v("p-kr")), per: 1,
     cap: v("p-cap") ? Number(v("p-cap")) : null, anon: $("p-anon").checked, consent: $("p-consent").checked,
     logo: b ? currentLogo : null, website: v("p-website")
   };
@@ -259,7 +258,6 @@ function submit(ev){
   if (!/^\d{4}$/.test(body.zip)) errs.push("postnummer med 4 siffer");
   if (!body.city) errs.push("poststed");
   if (!(body.kroner > 0)) errs.push("kronebeløp");
-  if (!(body.per >= 1 && Number.isInteger(body.per))) errs.push("antall tilskuere (helt tall)");
   if (body.cap != null && !(body.cap >= 1 && Number.isInteger(body.cap))) errs.push("tak som helt tall");
   if (!body.consent) errs.push("samtykke til faktura");
   if (errs.length) return showErr("Fyll inn: " + errs.join(", ") + ".");
@@ -269,7 +267,7 @@ function submit(ev){
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
     .then(function(res){
       if (!res.ok) return showErr(res.j.error || "Registreringen ble ikke lagret. Prøv igjen.");
-      $("pledge-form").reset(); setLogo(null); $("p-per").value = 1; syncType();
+      $("pledge-form").reset(); setLogo(null); syncType();
       $("pledge-form").classList.add("hidden"); $("join-done").classList.remove("hidden");
       $("bli-med").scrollIntoView({ behavior: "smooth", block: "start" });
       load();
@@ -279,7 +277,7 @@ function submit(ev){
 }
 
 Array.prototype.forEach.call(document.querySelectorAll('input[name="type"]'), function(r){ r.addEventListener("change", syncType); });
-["p-kr","p-per","p-cap"].forEach(function(id){ $(id).addEventListener("input", syncRate); });
+["p-kr","p-cap"].forEach(function(id){ $(id).addEventListener("input", syncRate); });
 $("pledge-form").addEventListener("submit", submit);
 $("logo-pick").addEventListener("click", function(){ $("p-logo").click(); });
 $("logo-remove").addEventListener("click", function(){ setLogo(null); });
