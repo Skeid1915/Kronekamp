@@ -9,6 +9,7 @@ const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const EXPECTED = Number(process.env.EXPECTED_ATTENDANCE || 600);
 const MATCH_TEXT = process.env.MATCH_TEXT || "Kronekamp Skeid – Stjørdals-Blink 31.10.2026";
+const KASPER_SECRET = process.env.KASPER_SECRET;
 
 if (!process.env.DATABASE_URL) { console.error("DATABASE_URL mangler."); process.exit(1); }
 if (!ADMIN_PASSWORD) { console.error("ADMIN_PASSWORD mangler."); process.exit(1); }
@@ -44,6 +45,8 @@ async function migrate() {
       key TEXT PRIMARY KEY,
       value JSONB
     );
+    ALTER TABLE pledges ADD COLUMN IF NOT EXISTS kasper_ref TEXT UNIQUE;
+    ALTER TABLE pledges ADD COLUMN IF NOT EXISTS cap_kr NUMERIC(10,2);
   `);
 }
 
@@ -65,10 +68,16 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "1mb" }));
 
 /* ---------- Helpers ---------- */
+const nf0 = new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 0 });
 const round2 = (n) => Math.round(n * 100) / 100;
 const rateOf = (p) => Number(p.kroner) / Number(p.per);
 const billed = (p, att) => (p.cap ? Math.min(att, Number(p.cap)) : att);
-const amountAt = (p, att) => round2(rateOf(p) * billed(p, att));
+const capKrOf = (p) => (p.cap_kr == null ? null : Number(p.cap_kr));
+const amountAt = (p, att) => {
+  const a = rateOf(p) * billed(p, att), max = capKrOf(p);
+  return round2(max == null ? a : Math.min(a, max));
+};
+const capText = (p) => (p.cap ? `, maks ${nf0.format(p.cap)} tilskuere` : capKrOf(p) != null ? `, maks ${nf0.format(capKrOf(p))} kr` : "");
 const str = (v, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const isInt = (n) => Number.isInteger(n);
 
@@ -101,6 +110,7 @@ function validate(body) {
     kroner: Number(body.kroner),
     per: 1, // always kroner per single spectator
     cap: body.cap === null || body.cap === "" || body.cap === undefined ? null : Number(body.cap),
+    cap_kr: body.capKr === null || body.capKr === "" || body.capKr === undefined ? null : Number(body.capKr),
     anon: body.anon === true,
   };
   const errs = [];
@@ -114,6 +124,8 @@ function validate(body) {
   if (!p.city) errs.push("poststed");
   if (!(p.kroner > 0 && p.kroner <= 100000)) errs.push("kronebeløp");
   if (p.cap !== null && !(isInt(p.cap) && p.cap >= 1 && p.cap <= 100000)) errs.push("tak som helt tall");
+  if (p.cap_kr !== null && !(isInt(p.cap_kr) && p.cap_kr >= 1 && p.cap_kr <= 10000000)) errs.push("tak i kroner som helt tall");
+  if (p.cap !== null && p.cap_kr !== null) errs.push("bare ett tak");
   if (body.consent !== true) errs.push("samtykke til faktura");
   return { p, errs };
 }
@@ -132,7 +144,7 @@ function rateLimited(ip) {
 app.get("/api/public", async (req, res) => {
   try {
     const r = await pool.query(
-      "SELECT id, type, name, kroner, per, cap, anon, (logo IS NOT NULL) AS has_logo FROM pledges ORDER BY id"
+      "SELECT id, type, name, kroner, per, cap, cap_kr, anon, (logo IS NOT NULL) AS has_logo FROM pledges ORDER BY id"
     );
     const finalAttendance = await getFinalAttendance();
     res.set("Cache-Control", "no-store");
@@ -147,6 +159,7 @@ app.get("/api/public", async (req, res) => {
         kroner: Number(p.kroner),
         per: p.per,
         cap: p.cap,
+        capKr: capKrOf(p),
         logo: p.type === "bedrift" && !p.anon && p.has_logo ? `/logo/${p.id}` : null,
       })),
     });
@@ -183,15 +196,67 @@ app.post("/api/pledges", async (req, res) => {
   catch (e) { return res.status(400).json({ error: e.message }); }
   try {
     await pool.query(
-      `INSERT INTO pledges (type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,anon,consent_at,logo,logo_mime)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),$14,$15)`,
-      [p.type, p.name, p.orgnr, p.contact, p.email, p.phone, p.address, p.zip, p.city, p.kroner, p.per, p.cap, p.anon,
+      `INSERT INTO pledges (type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,cap_kr,anon,consent_at,logo,logo_mime)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),$15,$16)`,
+      [p.type, p.name, p.orgnr, p.contact, p.email, p.phone, p.address, p.zip, p.city, p.kroner, p.per, p.cap, p.cap_kr, p.anon,
         logo ? logo.buf : null, logo ? logo.mime : null]
     );
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Registreringen ble ikke lagret. Prøv igjen." });
+  }
+});
+
+/* ---------- Kasper sync (Bearer KASPER_SECRET) ----------
+   Kasper is the source of truth for pledges registered there and mirrors each
+   one here, keyed by its own id (kasper_ref). */
+function requireKasper(req, res, next) {
+  const h = req.headers.authorization || "";
+  if (KASPER_SECRET && h.startsWith("Bearer ") && safeEqual(h.slice(7), KASPER_SECRET)) return next();
+  res.status(401).json({ error: "Ugyldig nøkkel." });
+}
+const KASPER_REF = /^[a-z0-9]{1,64}$/;
+
+app.put("/api/kasper/pledges/:ref", requireKasper, async (req, res) => {
+  const ref = req.params.ref;
+  if (!KASPER_REF.test(ref)) return res.status(400).json({ error: "Ugyldig id." });
+  try {
+    if ((await getFinalAttendance()) !== null) return res.status(409).json({ error: "Påmeldingen er stengt." });
+    const body = { ...(req.body || {}), consent: true };
+    const { p, errs } = validate(body);
+    const consentAt = new Date(body.consentAt);
+    if (!body.consentAt || isNaN(consentAt)) errs.push("samtykketidspunkt");
+    if (errs.length) return res.status(400).json({ error: "Fyll inn: " + errs.join(", ") + "." });
+    let logo = null;
+    if (p.type === "bedrift") { try { logo = parseLogo(body.logo); } catch (e) { logo = null; } }
+    await pool.query(
+      `INSERT INTO pledges (type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,cap_kr,anon,consent_at,logo,logo_mime,kasper_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       ON CONFLICT (kasper_ref) DO UPDATE SET type = EXCLUDED.type, name = EXCLUDED.name, orgnr = EXCLUDED.orgnr,
+         contact = EXCLUDED.contact, email = EXCLUDED.email, phone = EXCLUDED.phone, address = EXCLUDED.address,
+         zip = EXCLUDED.zip, city = EXCLUDED.city, kroner = EXCLUDED.kroner, per = EXCLUDED.per, cap = EXCLUDED.cap,
+         cap_kr = EXCLUDED.cap_kr, anon = EXCLUDED.anon, consent_at = EXCLUDED.consent_at,
+         logo = EXCLUDED.logo, logo_mime = EXCLUDED.logo_mime`,
+      [p.type, p.name, p.orgnr, p.contact, p.email, p.phone, p.address, p.zip, p.city, p.kroner, p.per, p.cap, p.cap_kr, p.anon,
+        consentAt, logo ? logo.buf : null, logo ? logo.mime : null, ref]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Bidraget ble ikke lagret." });
+  }
+});
+
+app.delete("/api/kasper/pledges/:ref", requireKasper, async (req, res) => {
+  if (!KASPER_REF.test(req.params.ref)) return res.status(400).json({ error: "Ugyldig id." });
+  try {
+    const r = await pool.query("DELETE FROM pledges WHERE kasper_ref = $1", [req.params.ref]);
+    if (!r.rowCount) return res.status(404).json({ error: "Finnes ikke." });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Bidraget ble ikke slettet." });
   }
 });
 
@@ -218,14 +283,14 @@ app.get("/admin", requireAdmin, (req, res) => {
 
 app.get("/admin/api/pledges", requireAdmin, async (req, res) => {
   const r = await pool.query(
-    `SELECT id,type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,anon,consent_at,created_at,
-            (logo IS NOT NULL) AS has_logo FROM pledges ORDER BY id`
+    `SELECT id,type,name,orgnr,contact,email,phone,address,zip,city,kroner,per,cap,cap_kr,anon,consent_at,created_at,
+            (logo IS NOT NULL) AS has_logo, (kasper_ref IS NOT NULL) AS from_kasper FROM pledges ORDER BY id`
   );
   res.set("Cache-Control", "no-store");
   res.json({
     expected: EXPECTED,
     finalAttendance: await getFinalAttendance(),
-    pledges: r.rows.map((p) => ({ ...p, kroner: Number(p.kroner) })),
+    pledges: r.rows.map(({ cap_kr, ...p }) => ({ ...p, kroner: Number(p.kroner), capKr: capKrOf({ cap_kr }) })),
   });
 });
 
@@ -257,7 +322,6 @@ app.put("/admin/api/settings", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-const nf0 = new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 0 });
 const fmtKr = (n) => { const r = round2(n); return Number.isInteger(r) ? String(r) : r.toFixed(2).replace(".", ","); };
 const deal = (p) => `${fmtKr(p.kroner)} kr per ${p.per === 1 ? "tilskuer" : p.per + " tilskuere"}`;
 const dec = (n) => round2(n).toFixed(2).replace(".", ",");
@@ -271,12 +335,12 @@ app.get("/admin/api/export.csv", requireAdmin, async (req, res) => {
     .map((p) => ({ ...p, kroner: Number(p.kroner) }))
     .sort((a, b) => amountAt(b, att) - amountAt(a, att));
   const head = ["Kundetype", "Navn", "Organisasjonsnummer", "Kontaktperson", "E-post", "Mobil", "Adresse", "Postnummer", "Poststed",
-    "Avtale", "Tak (tilskuere)", "Tilskuere fakturert", "Kr per tilskuer", "Beløp", "Forfall (dager)", "Samtykke registrert", "Fakturatekst"];
+    "Avtale", "Tak (tilskuere)", "Tak (kr)", "Tilskuere fakturert", "Kr per tilskuer", "Beløp", "Forfall (dager)", "Samtykke registrert", "Fakturatekst"];
   const lines = [head].concat(rows.map((p) => {
     const n = billed(p, att);
     return [p.type === "bedrift" ? "Bedrift" : "Privatperson", p.name, p.orgnr || "", p.contact || "", p.email, p.phone, p.address, p.zip, p.city,
-      deal(p), p.cap || "", n, dec(rateOf(p)), dec(amountAt(p, att)), 14, new Date(p.consent_at).toISOString().slice(0, 10),
-      `${MATCH_TEXT}: ${deal(p)}, ${nf0.format(n)} tilskuere`];
+      deal(p), p.cap || "", capKrOf(p) == null ? "" : dec(capKrOf(p)), n, dec(rateOf(p)), dec(amountAt(p, att)), 14, new Date(p.consent_at).toISOString().slice(0, 10),
+      `${MATCH_TEXT}: ${deal(p)}${capText(p)}, ${nf0.format(n)} tilskuere`];
   }));
   res.set("Content-Type", "text/csv; charset=utf-8");
   res.set("Content-Disposition", 'attachment; filename="kronekamp-skeid-fakturaliste.csv"');

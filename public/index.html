@@ -42,7 +42,7 @@
     </section>
 
     <ol class="steps">
-      <li><h3>Velg beløp</h3><p>Du bestemmer selv hvor mange kroner du gir per tilskuer. Sett gjerne et tak på hvor mange tilskuere du støtter.</p></li>
+      <li><h3>Velg beløp</h3><p>Du bestemmer selv hvor mange kroner du gir per tilskuer. Sett gjerne et tak, i antall tilskuere eller i kroner.</p></li>
       <li><h3>Vi teller på lørdag</h3><p>Det offisielle tilskuertallet mot Stjørdals-Blink avgjør hva bidraget ditt blir.</p></li>
       <li><h3>Faktura etter kampen</h3><p>Du får faktura med 14 dagers forfall. Pengene går til Skeid.</p></li>
     </ol>
@@ -87,9 +87,17 @@
               <span class="rate-preview" id="p-rate"></span>
             </div>
           </div>
-          <label class="f">Tak på antall tilskuere <span class="opt">Valgfritt. Bidraget stopper ved dette tallet.</span>
-            <input type="number" id="p-cap" min="1" step="1">
-          </label>
+          <div class="f full">
+            <span style="font-weight:600">Tak <span class="opt" style="font-weight:400">Valgfritt. Bidraget stopper når taket er nådd.</span></span>
+            <div class="rate-line">
+              <div class="seg" role="radiogroup" aria-label="Tak">
+                <label><input type="radio" name="captype" value="" checked> Ingen tak</label>
+                <label><input type="radio" name="captype" value="tilskuere"> Maks tilskuere</label>
+                <label><input type="radio" name="captype" value="kr"> Maks kroner</label>
+              </div>
+              <input type="number" id="p-cap" min="1" step="1" class="hidden" aria-label="Tak"> <span id="p-cap-unit"></span>
+            </div>
+          </div>
           <div class="f only-bedrift">
             <span style="font-weight:600">Logo <span class="opt" style="font-weight:400">Valgfritt. PNG, JPG eller SVG.</span></span>
             <div class="logo-box">
@@ -127,7 +135,8 @@ var nf2 = new Intl.NumberFormat("nb-NO", {minimumFractionDigits:2, maximumFracti
 function fmtKr(n){ var r = round2(n); return Number.isInteger(r) ? nf0.format(r) : nf2.format(r); }
 function rateOf(p){ return Number(p.kroner) / (Number(p.per) || 1); }
 function tierOf(r){ return r >= 30 ? "gull" : r >= 10 ? "solv" : "bronse"; }
-function amountAt(p, att){ return round2(rateOf(p) * (p.cap ? Math.min(att, p.cap) : att)); }
+function amountAt(p, att){ var a = rateOf(p) * (p.cap ? Math.min(att, p.cap) : att); return round2(p.capKr != null ? Math.min(a, p.capKr) : a); }
+function capText(p){ return p.cap ? ", maks " + nf0.format(p.cap) + " tilskuere" : p.capKr != null ? ", maks " + fmtKr(p.capKr) + " kr" : ""; }
 function deal(p){ return fmtKr(p.kroner) + " kr per " + (Number(p.per) === 1 ? "tilskuer" : nf0.format(p.per) + " tilskuere"); }
 function sortByAmount(list, att){
   return list.slice().sort(function(a, b){ return (amountAt(b, att) - amountAt(a, att)) || (rateOf(b) - rateOf(a)) || (a.id - b.id); });
@@ -163,7 +172,7 @@ function render(){
     list.forEach(function(p){
       var name = p.anon ? "Anonym bedrift" : p.name;
       var logo = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(name) + '" loading="lazy">' : '<div class="wordlogo' + (p.anon ? " anon" : "") + '">' + esc(name) + '</div>';
-      html += '<article class="sponsor"><div class="sponsor-logo">' + logo + '</div><div class="sponsor-meta"><strong>' + esc(name) + '</strong><span>' + esc(fmtKr(rateOf(p))) + ' kr per tilskuer' + (p.cap ? ', maks ' + nf0.format(p.cap) + ' tilskuere' : '') + '</span></div></article>';
+      html += '<article class="sponsor"><div class="sponsor-logo">' + logo + '</div><div class="sponsor-meta"><strong>' + esc(name) + '</strong><span>' + esc(fmtKr(rateOf(p))) + ' kr per tilskuer' + esc(capText(p)) + '</span></div></article>';
     });
     html += "</div></div>";
   });
@@ -172,7 +181,7 @@ function render(){
   $("privat-list").innerHTML = fans.length ? '<ol class="fans">' + fans.map(function(p, i){
     var name = p.anon ? "Anonym supporter" : p.name;
     return '<li><span class="rank">' + (i + 1) + '</span><span class="who"><span class="dot tier-' + tierOf(rateOf(p)) + '" aria-hidden="true"></span>' +
-      (p.anon ? "<em>" + esc(name) + "</em>" : esc(name)) + '<span class="cap">' + esc(deal(p)) + (p.cap ? ', maks ' + nf0.format(p.cap) + ' tilskuere' : '') +
+      (p.anon ? "<em>" + esc(name) + "</em>" : esc(name)) + '<span class="cap">' + esc(deal(p) + capText(p)) +
       '</span></span><span class="rate">' + esc(fmtKr(rateOf(p))) + ' kr</span></li>';
   }).join("") + '</ol>' : '<div class="empty"><strong>Ingen supportere er med ennå</strong>Selv noen få kroner per tilskuer blir mye når tribunen fylles.</div>';
   renderCountdown();
@@ -204,9 +213,21 @@ function syncRate(){
   var kr = Number($("p-kr").value);
   if (!(kr > 0)) { $("p-rate").textContent = ""; return; }
   var r = kr, att = data.finalAttendance != null ? data.finalAttendance : data.expected;
-  var cap = Number($("p-cap").value) || 0, n = cap ? Math.min(att, cap) : att;
+  var c = capOf(), amount = amountAt({ kroner: r, per: 1, cap: c.cap, capKr: c.capKr }, att);
   var tier = formType() === "bedrift" ? " (" + {gull:"Gull",solv:"Sølv",bronse:"Bronse"}[tierOf(r)] + ")" : "";
-  $("p-rate").textContent = (tier ? tier.slice(1) + ". " : "") + "Ved " + nf0.format(att) + " tilskuere: " + fmtKr(r * n) + " kr";
+  $("p-rate").textContent = (tier ? tier.slice(1) + ". " : "") + "Ved " + nf0.format(att) + " tilskuere: " + fmtKr(amount) + " kr";
+}
+function capType(){ return document.querySelector('input[name="captype"]:checked').value; }
+function capOf(){
+  var t = capType(), v = $("p-cap").value.trim(), n = v ? Number(v) : null;
+  return { cap: t === "tilskuere" ? n : null, capKr: t === "kr" ? n : null };
+}
+function syncCap(){
+  var t = capType();
+  $("p-cap").classList.toggle("hidden", !t);
+  $("p-cap-unit").textContent = t === "kr" ? "kr" : t === "tilskuere" ? "tilskuere" : "";
+  $("p-cap").setAttribute("aria-label", t === "kr" ? "Maks kroner" : "Maks antall tilskuere");
+  syncRate();
 }
 function setLogo(url){
   currentLogo = url || null;
@@ -246,7 +267,7 @@ function submit(ev){
   var body = {
     type: formType(), name: v("p-name"), orgnr: v("p-orgnr"), contact: v("p-contact"), email: v("p-email"), phone: v("p-phone"),
     address: v("p-address"), zip: v("p-zip"), city: v("p-city"), kroner: Number(v("p-kr")), per: 1,
-    cap: v("p-cap") ? Number(v("p-cap")) : null, anon: $("p-anon").checked, consent: $("p-consent").checked,
+    cap: capOf().cap, capKr: capOf().capKr, anon: $("p-anon").checked, consent: $("p-consent").checked,
     logo: b ? currentLogo : null, website: v("p-website")
   };
   var errs = [];
@@ -259,6 +280,7 @@ function submit(ev){
   if (!body.city) errs.push("poststed");
   if (!(body.kroner > 0)) errs.push("kronebeløp");
   if (body.cap != null && !(body.cap >= 1 && Number.isInteger(body.cap))) errs.push("tak som helt tall");
+  if (body.capKr != null && !(body.capKr >= 1 && Number.isInteger(body.capKr))) errs.push("tak i kroner som helt tall");
   if (!body.consent) errs.push("samtykke til faktura");
   if (errs.length) return showErr("Fyll inn: " + errs.join(", ") + ".");
   showErr("");
@@ -267,7 +289,7 @@ function submit(ev){
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
     .then(function(res){
       if (!res.ok) return showErr(res.j.error || "Registreringen ble ikke lagret. Prøv igjen.");
-      $("pledge-form").reset(); setLogo(null); syncType();
+      $("pledge-form").reset(); setLogo(null); syncCap(); syncType();
       $("pledge-form").classList.add("hidden"); $("join-done").classList.remove("hidden");
       $("bli-med").scrollIntoView({ behavior: "smooth", block: "start" });
       load();
@@ -277,6 +299,7 @@ function submit(ev){
 }
 
 Array.prototype.forEach.call(document.querySelectorAll('input[name="type"]'), function(r){ r.addEventListener("change", syncType); });
+Array.prototype.forEach.call(document.querySelectorAll('input[name="captype"]'), function(r){ r.addEventListener("change", syncCap); });
 ["p-kr","p-cap"].forEach(function(id){ $(id).addEventListener("input", syncRate); });
 $("pledge-form").addEventListener("submit", submit);
 $("logo-pick").addEventListener("click", function(){ $("p-logo").click(); });
@@ -287,7 +310,7 @@ $("p-logo").addEventListener("change", function(){
 });
 $("join-again").addEventListener("click", function(){ $("join-done").classList.add("hidden"); $("pledge-form").classList.remove("hidden"); });
 
-syncType(); render(); load();
+syncCap(); syncType(); render(); load();
 setInterval(load, 30000);
 setInterval(renderCountdown, 30000);
 })();

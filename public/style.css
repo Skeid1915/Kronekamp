@@ -141,14 +141,14 @@ label.f{display:flex;flex-direction:column;gap:5px;font-weight:600;font-size:.95
 label.f .opt{font-weight:400;color:var(--muted)}
 input[type=text],input[type=email],input[type=tel],input[type=number]{font:inherit;font-weight:400;padding:10px 12px;border:1.5px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);width:100%}
 input:focus{border-color:var(--navy);outline:none;box-shadow:0 0 0 3px rgba(200,16,46,.25)}
-.seg{display:inline-flex;border:1.5px solid var(--line);border-radius:4px;overflow:hidden}
+.seg{display:inline-flex;flex-wrap:wrap;max-width:100%;border:1.5px solid var(--line);border-radius:4px;overflow:hidden}
 .seg label{display:flex;align-items:center;gap:6px;padding:9px 16px;cursor:pointer;font-weight:600}
 .seg input{accent-color:var(--red)}
 .seg label:has(input:checked){background:var(--navy);color:#fff}
 .check{display:flex;gap:10px;align-items:flex-start;font-weight:500}
 .check input{width:20px;height:20px;margin-top:2px;accent-color:var(--red);flex:none}
 .rate-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.rate-line input{width:120px}
+.rate-line input[type=number]{width:120px}
 .rate-preview{font-weight:600;color:var(--red-ink)}
 .logo-box{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .logo-prev{width:140px;height:70px;background:#fff;border:1px solid var(--line);border-radius:4px;display:grid;place-items:center;padding:6px;color:#7A8496;font-size:.85rem}

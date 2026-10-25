@@ -67,7 +67,7 @@ var nf0 = new Intl.NumberFormat("nb-NO", {maximumFractionDigits:0});
 var nf2 = new Intl.NumberFormat("nb-NO", {minimumFractionDigits:2, maximumFractionDigits:2});
 function fmtKr(n){ var r = round2(n); return Number.isInteger(r) ? nf0.format(r) : nf2.format(r); }
 function rateOf(p){ return Number(p.kroner) / (Number(p.per) || 1); }
-function amountAt(p, att){ return round2(rateOf(p) * (p.cap ? Math.min(att, p.cap) : att)); }
+function amountAt(p, att){ var a = rateOf(p) * (p.cap ? Math.min(att, p.cap) : att); return round2(p.capKr != null ? Math.min(a, p.capKr) : a); }
 function deal(p){ return fmtKr(p.kroner) + " kr per " + (Number(p.per) === 1 ? "tilskuer" : nf0.format(p.per) + " tilskuere"); }
 function status(msg, kind){ var el = $("status"); el.textContent = msg || ""; el.className = "status " + (kind || "") + (msg ? "" : " hidden"); }
 
@@ -93,10 +93,10 @@ function render(){
         (p.has_logo ? '<button class="btn btn-line btn-small" data-act="logo" data-id="' + p.id + '">Fjern logo</button>' : '') +
         '<button class="btn btn-line btn-small" data-act="del" data-id="' + p.id + '">Slett</button>';
     return '<tr><td><strong>' + esc(p.name) + '</strong><span class="sub">' + (p.type === "bedrift" ? "Bedrift, org.nr. " + esc(p.orgnr) : "Privatperson") +
-      (p.contact ? ", " + esc(p.contact) : "") + (p.anon ? ' <span class="tag">Anonym</span>' : '') + (p.has_logo ? ' <span class="tag">Logo</span>' : '') +
+      (p.contact ? ", " + esc(p.contact) : "") + (p.anon ? ' <span class="tag">Anonym</span>' : '') + (p.has_logo ? ' <span class="tag">Logo</span>' : '') + (p.from_kasper ? ' <span class="tag">Fra Kasper</span>' : '') +
       '</span><span class="sub">Registrert ' + new Date(p.created_at).toLocaleString("nb-NO", { dateStyle: "short", timeStyle: "short" }) + '</span></td>' +
       '<td>' + esc(p.email) + '<span class="sub">' + esc(p.phone) + '</span><span class="sub">' + esc(p.address) + ', ' + esc(p.zip) + ' ' + esc(p.city) + '</span></td>' +
-      '<td>' + esc(deal(p)) + (p.cap ? '<span class="sub">Tak: ' + nf0.format(p.cap) + ' tilskuere</span>' : '') + '</td>' +
+      '<td>' + esc(deal(p)) + (p.cap ? '<span class="sub">Tak: ' + nf0.format(p.cap) + ' tilskuere</span>' : p.capKr != null ? '<span class="sub">Tak: ' + esc(fmtKr(p.capKr)) + ' kr</span>' : '') + '</td>' +
       '<td class="num">' + esc(fmtKr(rateOf(p))) + '</td><td class="num">' + esc(fmtKr(amountAt(p, att))) + ' kr</td>' +
       '<td><div class="actions">' + acts + '</div></td></tr>';
   }).join("");
