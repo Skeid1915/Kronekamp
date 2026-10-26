@@ -136,10 +136,9 @@ function fmtKr(n){ var r = round2(n); return Number.isInteger(r) ? nf0.format(r)
 function rateOf(p){ return Number(p.kroner) / (Number(p.per) || 1); }
 function tierOf(r){ return r >= 30 ? "gull" : r >= 10 ? "solv" : "bronse"; }
 function amountAt(p, att){ var a = rateOf(p) * (p.cap ? Math.min(att, p.cap) : att); return round2(p.capKr != null ? Math.min(a, p.capKr) : a); }
-function capText(p){ return p.cap ? ", maks " + nf0.format(p.cap) + " tilskuere" : p.capKr != null ? ", maks " + fmtKr(p.capKr) + " kr" : ""; }
 function deal(p){ return fmtKr(p.kroner) + " kr per " + (Number(p.per) === 1 ? "tilskuer" : nf0.format(p.per) + " tilskuere"); }
-function sortByAmount(list, att){
-  return list.slice().sort(function(a, b){ return (amountAt(b, att) - amountAt(a, att)) || (rateOf(b) - rateOf(a)) || (a.id - b.id); });
+function sortByRate(list){
+  return list.slice().sort(function(a, b){ return (rateOf(b) - rateOf(a)) || (a.id - b.id); });
 }
 
 function render(){
@@ -147,7 +146,7 @@ function render(){
   var att = final ? data.finalAttendance : data.expected;
   var all = data.pledges;
   var tr = round2(all.reduce(function(s, p){ return s + rateOf(p); }, 0));
-  var total = all.reduce(function(s, p){ return s + amountAt(p, att); }, 0);
+  var total = Number(data.total) || 0;
   $("board-num").innerHTML = esc(Number.isInteger(tr) ? nf0.format(tr) : nf2.format(tr)) + "<small>kr</small>";
   $("board-sub").innerHTML = !all.length ? "Ingen bidrag ennå. Bli den første!"
     : final ? "<strong>" + nf0.format(att) + " tilskuere</strong> kom på kampen. Det ble <strong>" + esc(fmtKr(total)) + " kr</strong> til Skeid."
@@ -158,8 +157,8 @@ function render(){
   $("join-closed").classList.toggle("hidden", !final);
   if (final) { $("pledge-form").classList.add("hidden"); $("join-done").classList.add("hidden"); }
 
-  var firms = sortByAmount(all.filter(function(p){ return p.type === "bedrift"; }), att);
-  var fans = sortByAmount(all.filter(function(p){ return p.type !== "bedrift"; }), att);
+  var firms = sortByRate(all.filter(function(p){ return p.type === "bedrift"; }));
+  var fans = sortByRate(all.filter(function(p){ return p.type !== "bedrift"; }));
   $("bedrift-count").textContent = firms.length ? (firms.length === 1 ? "1 bedrift" : firms.length + " bedrifter") : "";
   $("privat-count").textContent = fans.length ? (fans.length === 1 ? "1 supporter" : fans.length + " supportere") : "";
 
@@ -172,7 +171,7 @@ function render(){
     list.forEach(function(p){
       var name = p.anon ? "Anonym bedrift" : p.name;
       var logo = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(name) + '" loading="lazy">' : '<div class="wordlogo' + (p.anon ? " anon" : "") + '">' + esc(name) + '</div>';
-      html += '<article class="sponsor"><div class="sponsor-logo">' + logo + '</div><div class="sponsor-meta"><strong>' + esc(name) + '</strong><span>' + esc(fmtKr(rateOf(p))) + ' kr per tilskuer' + esc(capText(p)) + '</span></div></article>';
+      html += '<article class="sponsor"><div class="sponsor-logo">' + logo + '</div><div class="sponsor-meta"><strong>' + esc(name) + '</strong><span>' + esc(fmtKr(rateOf(p))) + ' kr per tilskuer</span></div></article>';
     });
     html += "</div></div>";
   });
@@ -181,7 +180,7 @@ function render(){
   $("privat-list").innerHTML = fans.length ? '<ol class="fans">' + fans.map(function(p, i){
     var name = p.anon ? "Anonym supporter" : p.name;
     return '<li><span class="rank">' + (i + 1) + '</span><span class="who"><span class="dot tier-' + tierOf(rateOf(p)) + '" aria-hidden="true"></span>' +
-      (p.anon ? "<em>" + esc(name) + "</em>" : esc(name)) + '<span class="cap">' + esc(deal(p) + capText(p)) +
+      (p.anon ? "<em>" + esc(name) + "</em>" : esc(name)) + '<span class="cap">' + esc(deal(p)) +
       '</span></span><span class="rate">' + esc(fmtKr(rateOf(p))) + ' kr</span></li>';
   }).join("") + '</ol>' : '<div class="empty"><strong>Ingen supportere er med ennå</strong>Selv noen få kroner per tilskuer blir mye når tribunen fylles.</div>';
   renderCountdown();

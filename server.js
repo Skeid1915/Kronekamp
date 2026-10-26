@@ -154,10 +154,13 @@ app.get("/api/public", async (req, res) => {
       "SELECT id, type, name, kroner, per, cap, cap_kr, anon, (logo IS NOT NULL) AS has_logo FROM pledges ORDER BY id"
     );
     const finalAttendance = await getFinalAttendance();
+    const att = finalAttendance == null ? EXPECTED : finalAttendance;
     res.set("Cache-Control", "no-store");
+    // Caps are admin-only: the public page gets the summed total, not each pledge's cap.
     res.json({
       expected: EXPECTED,
       finalAttendance,
+      total: round2(r.rows.reduce((s, p) => s + amountAt(p, att), 0)),
       pledges: r.rows.map((p) => ({
         id: p.id,
         type: p.type,
@@ -165,8 +168,6 @@ app.get("/api/public", async (req, res) => {
         name: p.anon ? null : p.name,
         kroner: Number(p.kroner),
         per: p.per,
-        cap: p.cap,
-        capKr: capKrOf(p),
         logo: p.type === "bedrift" && !p.anon && p.has_logo ? `/logo/${p.id}` : null,
       })),
     });
