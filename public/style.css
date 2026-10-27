@@ -102,9 +102,9 @@ h2{font-size:clamp(2rem,5vw,2.75rem);font-weight:800;text-transform:uppercase}
 .tier-solv .grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
 .tier-bronse .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 .sponsor{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--tc);border-radius:4px;display:flex;flex-direction:column}
-.sponsor-logo{background:#fff;display:grid;place-items:center;padding:18px;border-bottom:1px solid var(--line)}
+.sponsor-logo{background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;box-sizing:border-box;padding:18px;border-bottom:1px solid var(--line)}
 .tier-gull .sponsor-logo{height:170px} .tier-solv .sponsor-logo{height:120px} .tier-bronse .sponsor-logo{height:86px;padding:12px}
-.sponsor-logo img{max-height:100%;max-width:100%;object-fit:contain}
+.sponsor-logo img{display:block;max-height:100%;max-width:100%;width:auto;height:auto;min-width:0;min-height:0;object-fit:contain}
 .sponsor-logo .wordlogo{font-family:var(--display);font-weight:800;color:#12284C;text-align:center;line-height:1;overflow-wrap:anywhere}
 .tier-gull .wordlogo{font-size:2.2rem} .tier-solv .wordlogo{font-size:1.6rem} .tier-bronse .wordlogo{font-size:1.15rem}
 .sponsor-logo .wordlogo.anon{color:#7A8496;font-weight:600}

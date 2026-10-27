@@ -162,12 +162,12 @@ function render(){
   $("bedrift-count").textContent = firms.length ? (firms.length === 1 ? "1 bedrift" : firms.length + " bedrifter") : "";
   $("privat-count").textContent = fans.length ? (fans.length === 1 ? "1 supporter" : fans.length + " supportere") : "";
 
-  var tiers = [["gull","Gull","30 kr eller mer per tilskuer"],["solv","Sølv","10–29 kr per tilskuer"],["bronse","Bronse","Under 10 kr per tilskuer"]];
+  var tiers = [["gull","Gull"],["solv","Sølv"],["bronse","Bronse"]];
   var html = "";
   tiers.forEach(function(t){
     var list = firms.filter(function(p){ return tierOf(rateOf(p)) === t[0]; });
     if (!list.length) return;
-    html += '<div class="tier tier-' + t[0] + '"><h3 class="tier-name">' + t[1] + ' <span>' + t[2] + '</span></h3><div class="grid">';
+    html += '<div class="tier tier-' + t[0] + '"><h3 class="tier-name">' + t[1] + '</h3><div class="grid">';
     list.forEach(function(p){
       var name = p.anon ? "Anonym bedrift" : p.name;
       var logo = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(name) + '" loading="lazy">' : '<div class="wordlogo' + (p.anon ? " anon" : "") + '">' + esc(name) + '</div>';
